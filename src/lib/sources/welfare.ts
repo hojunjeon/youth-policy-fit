@@ -1,8 +1,8 @@
 import { XMLParser } from "fast-xml-parser";
 import type { Connector } from "@/lib/sources/types";
-import type { Policy } from "@/lib/types";
-import { parseEligibilityText, toRuleFragment, isYouthRelevant } from "@/lib/sources/parseEligibility";
-import { toCategoryFromText, pick, splitChecklist, parseApplyWindow, capList, asArray, stringifyRecord } from "@/lib/sources/normalize";
+import type { Policy, Rule } from "@/lib/types";
+import { toCategoryFromText, pick, splitChecklist, capList, asArray, stringifyRecord } from "@/lib/sources/normalize";
+import { REGIONS } from "@/data/regions";
 
 // 복지로(한국사회보장정보원) 중앙부처/지자체 복지서비스 API.
 //   중앙부처: data.go.kr/data/15090532
@@ -10,18 +10,59 @@ import { toCategoryFromText, pick, splitChecklist, parseApplyWindow, capList, as
 // 둘 다 서비스명 "한국사회보장정보원_○○복지서비스", XML 응답, 서비스키는 공공데이터포털
 // 공용 키(DATA_GO_KR_API_KEY)를 그대로 쓴다.
 //
-// 엔드포인트 검증: 2026-08-17, curl로 실제 호출해 확인.
-//   curl "http://apis.data.go.kr/B554287/NationalWelfareInformationsV001/NationalWelfarelistV001?serviceKey=test"
-//   → HTTP 403 <errMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</errMsg> (경로 자체는 유효, 키만 미등록)
-//   curl "http://apis.data.go.kr/B554287/LocalGovernmentWelfareInformations/LcgvWelfarelist?serviceKey=test"
-//   → 동일하게 경로 유효 확인.
-// 상세조회(NationalWelfaredetailedV001/LcgvWelfaredetailed)는 항목마다 별도 호출이 필요해
-// 200개 캡·8초 타임아웃 안에서는 비효율적이라 호출하지 않았다. 아래 필드명은 목록조회
-// 응답에 실제로 포함되는지 유효한 키로 확인하지 못했으므로, 데이터 페이지에 적힌 항목명
-// (서비스명/지원대상/선정기준/신청방법)과 이 API 계열에서 흔히 쓰이는 영문 필드명 후보를
-// 함께 두었다. *** 실 키 발급 후 첫 호출 시 응답을 로깅해 필드명을 검증할 것. ***
+// ── 실 키로 재검증한 기록 (2026-08-17, Node 스크립트로 직접 호출) ──────────────
+//
+// [central] GET .../NationalWelfarelistV001
+//   - serviceKey만으로는 400계열 에러(resultCode 10 INVALID_REQUEST_PARAMETER_ERROR)가 난다.
+//     반드시 callTp=L & srchKeyCode=003 를 함께 보내야 한다(다른 값 조합은 시도하지 않음 —
+//     이 조합이 SUCCESS를 내는 것만 확인). 이 둘이 빠지면 항상 실패한다.
+//   - callTp=L&srchKeyCode=003만 보내면 totalCount=461, resultCode 0 SUCCESS.
+//   - lifeArray 파라미터가 서버에서 실제로 필터링된다(값을 바꿔가며 totalCount 변화로 확인):
+//       001=영유아(69) 002=아동(97) 003=청소년(117) 004=청년(165) 005=중장년(140)
+//       006=노년(143) 007=임신·출산(39) 008=NO DATA FOUND(존재하지 않는 코드)
+//     → 애초 추정했던 "006=청년"은 틀렸고 실제로는 004=청년. lifeArray=004로 필터링된
+//     165건 전부의 <lifeArray> 값에 "청년"이 포함됨을 직접 확인했다(무작위 다건 샘플).
+//   - trgterIndvdlArray(대상개인 특성 코드, 예: 013)는 시도한 값 전부 NO DATA FOUND(resultCode 40)만
+//     반환해 사용하지 않았다.
+//   - 목록 응답 필드(실제로 나온 것만): inqNum, intrsThemaArray(관심주제 CSV), jurMnofNm(소관부처),
+//     jurOrgNm(소관과), lifeArray(생애주기 CSV), onapPsbltYn, rprsCtadr(대표전화), servDgst(한 줄 요약),
+//     servDtlLink(복지로 상세 URL), servId, servNm, sprtCycNm(지원주기), srvPvsnNm(제공방식),
+//     svcfrstRegTs(최초등록일), trgterIndvdlArray(대상특성 CSV, 종종 없음).
+//     "지원대상"/"선정기준"/"신청방법"에 해당하는 필드는 목록 응답에 전혀 없다 — 상세조회
+//     (NationalWelfaredetailedV001)에만 있는데, 항목마다 별도 호출이 필요해 캡·타임아웃
+//     예산 안에서 비효율적이라 호출하지 않는다.
+//
+// [local] GET .../LcgvWelfarelist
+//   - serviceKey + pageNo + numOfRows 만으로 SUCCESS(totalCount=4778) — callTp/srchKeyCode 불필요.
+//   - lifeArray 파라미터도 central과 같은 코드 체계로 동작한다(직접 재확인):
+//       001=897 002=859 003=938 004=청년(1246) 005=944 006=노년(1332) 007=467 008=0
+//     lifeArray=004로 필터링된 1246건의 <lifeNmArray> 값 전부에 "청년" 포함을 확인했다.
+//   - 목록 응답 필드(실제로 나온 것만): aplyMtdNm(신청방법: "방문"/"인터넷, 방문" 같은 짧은 채널명),
+//     bizChrDeptNm(담당부서 전체경로, 예: "전남광주통합특별시 강진군 복지환경국 군민행복과"),
+//     ctpvNm(시도명), inqNum, intrsThemaNmArray(관심주제, 종종 없음), lastModYmd(최종수정일),
+//     lifeNmArray(생애주기, 종종 없음), servDgst, servDtlLink, servId, servNm, sggNm(시군구명),
+//     sprtCycNm, srvPvsnNm, trgterIndvdlNmArray(대상특성, 종종 없음).
+//   - ctpvNm은 대부분 REGIONS(src/data/regions.ts)의 정식 명칭과 정확히 일치한다(직접 대조:
+//     서울특별시/경기도/강원특별자치도/인천광역시/경상남도/경상북도/대구광역시/대전광역시/
+//     부산광역시/울산광역시/전북특별자치도/제주특별자치도/충청남도/충청북도 — 모두 그대로 일치).
+//     단 하나의 예외로 "전남광주통합특별시"라는 통합 표기가 실제로 존재한다(전라남도+광주광역시
+//     통합 표기로 보임) — REGIONS엔 광주(29)·전남(46)이 별도 항목이라, 이 표기는 두 코드를
+//     모두 붙인다(SIDO_NAME_OVERRIDES). 세종특별자치시는 샘플(2,400여 건)에 한 번도 나오지
+//     않아 실존 여부를 확인하지 못했지만, REGIONS 정식명 그대로 매칭되므로 나오면 자동 처리된다.
+//
+// [필터링 방식] 목록 응답엔 지원대상/선정기준 자유 텍스트가 전혀 없어 parseEligibility.ts의
+// isYouthRelevant()에 넘길 텍스트 자체가 없다(빈 문자열을 넘기면 그 함수는 근거 없음으로 보고
+// 항상 false를 반환해 전건이 드롭된다 — 실제로 개편 전 버전이 그렇게 항상 0건을 반환했던
+// 원인이다). 서버가 lifeArray=004로 "청년"을 이미 정확히 필터링해주므로 클라이언트 텍스트
+// 필터링은 쓰지 않고 서버 필터를 그대로 신뢰한다.
+//
+// [자격 요건] 나이/소득 등 세부 요건을 판정할 텍스트가 없으므로 규칙은 항상 unverified로 두고
+// (match.ts가 needsInfo로 강등해 "공고 원문 확인"을 유도), ctpvNm이 매핑되는 지자체 항목만
+// rule.sido를 채워 지역 필터링이 동작하게 한다.
 const CENTRAL_ENDPOINT = "https://apis.data.go.kr/B554287/NationalWelfareInformationsV001/NationalWelfarelistV001";
 const LOCAL_ENDPOINT = "https://apis.data.go.kr/B554287/LocalGovernmentWelfareInformations/LcgvWelfarelist";
+const YOUTH_LIFE_ARRAY_CODE = "004"; // 생애주기 코드 — 위 주석대로 004 = 청년(central/local 공통 확인)
+const NUM_OF_ROWS = "50";
 
 const parser = new XMLParser({ ignoreAttributes: true, trimValues: true });
 
@@ -29,46 +70,113 @@ interface RawItem {
   [key: string]: unknown;
 }
 
-// 필드명이 실 키로 검증되지 않은 추정 스펙이라, 잘못된 필드를 잘못 해석해 부적합한
-// 항목을 대량으로 끌어올 위험을 줄이기 위해 요청당 개수를 200에서 50으로 낮춘다.
-// (route.ts의 200건 캡은 그대로 유지 — 두 엔드포인트 합쳐도 100건이라 안전망 역할.)
-async function fetchList(endpoint: string, apiKey: string, signal?: AbortSignal): Promise<RawItem[]> {
-  const params = new URLSearchParams({ serviceKey: apiKey, pageNo: "1", numOfRows: "50" });
-  const res = await fetch(`${endpoint}?${params}`, { next: { revalidate: 3600 }, signal });
-  if (!res.ok) throw new Error(`welfare API ${res.status}`);
-  const xml = await res.text();
-  const json = parser.parse(xml);
-  const items = json?.response?.body?.items?.item ?? json?.wantedList?.item ?? [];
-  return asArray(items);
+// "전남광주통합특별시"처럼 REGIONS의 개별 시도명과 문자 그대로 일치하지 않는 통합 표기를
+// 여러 코드로 풀어준다. REGIONS 자체는 수정하지 않는다(다른 커넥터도 함께 참조하는 공유 데이터).
+const SIDO_NAME_OVERRIDES: Record<string, string[]> = {
+  전남광주통합특별시: ["29", "46"], // 광주광역시(29) + 전라남도(46)
+};
+
+function sidoCodesFromCtpvNm(ctpvNm: string | undefined): string[] | undefined {
+  if (!ctpvNm) return undefined;
+  const overridden = SIDO_NAME_OVERRIDES[ctpvNm];
+  if (overridden) return overridden;
+  const region = REGIONS.find((r) => r.name === ctpvNm);
+  return region ? [region.code] : undefined;
 }
 
-function normalize(raw: RawItem, idPrefix: string, agencyFallback: string, today: string): Policy | null {
+// buildEligibilityNote(parseEligibility.ts)는 접미사가 "공고 원문 확인"으로 고정돼 있어
+// 이 소스엔 맞지 않는다(목록 응답이 항상 복지로 상세 링크를 갖고 있으므로 "복지로 상세에서
+// 확인"이 더 정확한 안내다) — 같은 트림/말줄임 로직을 이 파일 안에서 짧게 재현한다.
+function buildWelfareNote(summary: string, maxLen = 70): string {
+  const trimmed = summary.replace(/\s+/g, " ").trim();
+  const excerpt = trimmed.length > maxLen ? `${trimmed.slice(0, maxLen)}…` : trimmed;
+  return excerpt ? `${excerpt} — 지원대상은 복지로 상세에서 확인` : "지원대상은 복지로 상세에서 확인";
+}
+
+// 목록 응답엔 지원대상/선정기준 텍스트가 없어 나이 등 세부 요건을 절대 확신 있게 파싱할 수
+// 없다 — 그래서 항상 unverified=true. sido만은 ctpvNm이라는 구조화된 필드에서 나온 확실한
+// 값이라 별도로 채운다(unverified와는 독립적으로 지역 필터링이 동작해야 하므로).
+function buildRule(summary: string, sido?: string[]): Rule {
+  return { unverified: true, sido, note: buildWelfareNote(summary) };
+}
+
+async function fetchList(
+  endpoint: string,
+  apiKey: string,
+  extraParams: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<RawItem[]> {
+  const params = new URLSearchParams({
+    serviceKey: apiKey,
+    pageNo: "1",
+    numOfRows: NUM_OF_ROWS,
+    lifeArray: YOUTH_LIFE_ARRAY_CODE,
+    ...extraParams,
+  });
+  const res = await fetch(`${endpoint}?${params}`, { next: { revalidate: 3600 }, signal });
+  if (!res.ok) throw new Error(`welfare API ${res.status} (${endpoint})`);
+  const xml = await res.text();
+  const json = parser.parse(xml);
+  const wanted = json?.wantedList;
+  const resultCode = wanted?.resultCode;
+  // resultCode "0" = SUCCESS. 그 외(예: "10" INVALID_REQUEST_PARAMETER_ERROR, "40" NO DATA FOUND)는
+  // HTTP 200으로 오므로 상태 코드만으로는 못 걸러낸다 — 본문의 resultCode를 직접 봐야 한다.
+  // "40"(NO DATA FOUND)은 에러가 아니라 그냥 빈 결과이므로 조용히 빈 배열을 반환한다.
+  if (resultCode !== undefined && String(resultCode) !== "0" && String(resultCode) !== "40") {
+    throw new Error(`welfare API resultCode ${resultCode} ${wanted?.resultMessage ?? ""} (${endpoint})`);
+  }
+  return asArray(wanted?.servList ?? []);
+}
+
+function normalizeCentral(raw: RawItem, today: string): Policy | null {
   const item = stringifyRecord(raw);
-  const id = pick(item, ["servId", "서비스ID", "wantedId", "id"]);
-  const name = pick(item, ["servNm", "서비스명", "wantedTitle"]);
+  const id = pick(item, ["servId"]);
+  const name = pick(item, ["servNm"]);
   if (!id || !name) return null;
 
-  const target = pick(item, ["지원대상", "aplyTrgtCn", "trgterIndAtdcs", "trgterIndAtdcsNmList"]) ?? "";
-  const criteria = pick(item, ["선정기준", "slctCrit"]) ?? "";
-  const eligibilityText = [target, criteria].filter(Boolean).join(" ");
-  const benefit = pick(item, ["servDgst", "지원내용", "alwServCn"]) ?? "";
-  const method = pick(item, ["신청방법", "aplyMtdNm"]);
-  const agency = pick(item, ["소관기관명", "jurMnofNm", "jurOrgNm"]) ?? agencyFallback;
-  const period = pick(item, ["신청기한", "sprtCycNm"]);
-  const url = pick(item, ["servDtlLink", "servURL"]) ?? "https://www.bokjiro.go.kr";
-  const fieldText = pick(item, ["intrsThemaNmList", "지원분야"]);
-
-  if (!isYouthRelevant(eligibilityText, parseEligibilityText(eligibilityText))) return null;
+  const summary = pick(item, ["servDgst"]) ?? "";
+  const agency = pick(item, ["jurMnofNm"]) ?? "중앙부처";
+  const url = pick(item, ["servDtlLink"]) ?? "https://www.bokjiro.go.kr";
+  const themeText = pick(item, ["intrsThemaArray"]);
 
   return {
-    id: `wf-${idPrefix}-${id}`,
+    id: `wf-c-${id}`,
     name,
     agency,
-    category: toCategoryFromText(fieldText ?? name),
-    summary: (benefit || target).slice(0, 80),
-    benefit: benefit.slice(0, 200) || "지원 내용은 공고 원문 확인",
-    rule: toRuleFragment(parseEligibilityText(eligibilityText), eligibilityText || name),
-    apply: parseApplyWindow(period),
+    category: toCategoryFromText(themeText ?? summary ?? name),
+    summary: summary.slice(0, 80) || name,
+    benefit: summary.slice(0, 200) || "지원 내용은 복지로 상세에서 확인",
+    rule: buildRule(summary || name),
+    apply: { kind: "상시" }, // 목록 응답엔 신청기간 필드가 없다(sprtCycNm은 지원주기일 뿐 접수기간이 아님)
+    checklist: splitChecklist(undefined, "복지로 또는 관할 행정복지센터에서 신청 방법 확인"),
+    url,
+    source: "welfare",
+    updatedAt: today,
+  };
+}
+
+function normalizeLocal(raw: RawItem, today: string): Policy | null {
+  const item = stringifyRecord(raw);
+  const id = pick(item, ["servId"]);
+  const name = pick(item, ["servNm"]);
+  if (!id || !name) return null;
+
+  const summary = pick(item, ["servDgst"]) ?? "";
+  const agency = pick(item, ["bizChrDeptNm"]) ?? "지방자치단체";
+  const url = pick(item, ["servDtlLink"]) ?? "https://www.bokjiro.go.kr";
+  const themeText = pick(item, ["intrsThemaNmArray"]);
+  const method = pick(item, ["aplyMtdNm"]);
+  const ctpvNm = pick(item, ["ctpvNm"]);
+
+  return {
+    id: `wf-l-${id}`,
+    name,
+    agency,
+    category: toCategoryFromText(themeText ?? summary ?? name),
+    summary: summary.slice(0, 80) || name,
+    benefit: summary.slice(0, 200) || "지원 내용은 복지로 상세에서 확인",
+    rule: buildRule(summary || name, sidoCodesFromCtpvNm(ctpvNm)),
+    apply: { kind: "상시" }, // 목록 응답엔 신청기간 필드가 없다
     checklist: splitChecklist(method, "복지로 또는 관할 행정복지센터에서 신청 방법 확인"),
     url,
     source: "welfare",
@@ -78,20 +186,20 @@ function normalize(raw: RawItem, idPrefix: string, agencyFallback: string, today
 
 export async function fetchWelfarePolicies(apiKey: string, signal?: AbortSignal): Promise<Policy[]> {
   const [centralRes, localRes] = await Promise.allSettled([
-    fetchList(CENTRAL_ENDPOINT, apiKey, signal),
-    fetchList(LOCAL_ENDPOINT, apiKey, signal),
+    fetchList(CENTRAL_ENDPOINT, apiKey, { callTp: "L", srchKeyCode: "003" }, signal),
+    fetchList(LOCAL_ENDPOINT, apiKey, {}, signal),
   ]);
   const today = new Date().toISOString().slice(0, 10);
   const normalized: Policy[] = [];
   if (centralRes.status === "fulfilled") {
     for (const raw of centralRes.value) {
-      const p = normalize(raw, "c", "보건복지부", today);
+      const p = normalizeCentral(raw, today);
       if (p) normalized.push(p);
     }
   }
   if (localRes.status === "fulfilled") {
     for (const raw of localRes.value) {
-      const p = normalize(raw, "l", "지방자치단체", today);
+      const p = normalizeLocal(raw, today);
       if (p) normalized.push(p);
     }
   }

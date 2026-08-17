@@ -30,10 +30,17 @@ function isPlausibleAge(n: number): boolean {
 
 // 나이 표현이 "신청인 본인"이 아니라 "돌봄 대상인 자녀/아동"을 가리키는 경우가 흔하다
 // (예: "만 12세 이하 아동을 양육하는 청년" — 여기서 12세는 아이 나이고, 신청인 자격은
-// 오히려 나이 제한이 없는 "청년"). 나이 표현 바로 뒤(짧은 창)에 부양가족을 뜻하는 명사가
-// 오면 그 나이는 신청인 본인의 것이 아니라고 보고 후보에서 제외한다.
-const DEPENDENT_NOUNS = ["아동", "자녀", "영유아", "유아", "손자녀"];
-const DEPENDENT_NOUN_WINDOW = 6;
+// 오히려 나이 제한이 없는 "청년"). 나이 표현 근처에 부양가족을 뜻하는 명사가 있으면 그
+// 나이는 신청인 본인의 것이 아니라고 보고 후보에서 제외한다.
+//
+// 한국어 어순상 부양가족 명사가 나이 표현 "뒤"(예: "18세 미만 자녀")뿐 아니라 "앞"(예:
+// "부양자녀 : 18세 미만", "아동(만 19세 미만)")에 오는 경우도 실제 데이터에서 매우 흔하다
+// (근로·자녀장려금의 "부양자녀 : (18세 미만)", 진술조력인 지원의 "아동(만19세미만)").
+// 기존엔 뒤쪽만 짧게(6자) 봐서 이런 "앞쪽" 어순을 전부 놓쳤다 — 앞(12자)·뒤(8자) 양쪽을
+// 모두 봐야 한다.
+const DEPENDENT_NOUNS = ["아동", "자녀", "영유아", "유아", "손자녀", "부양가족", "미성년"];
+const DEPENDENT_NOUN_BEFORE_WINDOW = 12;
+const DEPENDENT_NOUN_AFTER_WINDOW = 8;
 
 // 신청인 본인을 가리키는 표현이 나이 표현 근처에 있으면, 그 나이 후보를 우선한다
 // (여러 후보가 남았을 때의 동점 처리 기준).
@@ -48,15 +55,70 @@ function isPlausibleApplicantBand(minAge?: number, maxAge?: number): boolean {
   return true;
 }
 
-function hasDependentNounAfter(text: string, end: number): boolean {
-  const after = text.slice(end, end + DEPENDENT_NOUN_WINDOW);
-  return DEPENDENT_NOUNS.some((n) => after.includes(n));
+function hasDependentNounNear(text: string, start: number, end: number): boolean {
+  const before = text.slice(Math.max(0, start - DEPENDENT_NOUN_BEFORE_WINDOW), start);
+  const after = text.slice(end, end + DEPENDENT_NOUN_AFTER_WINDOW);
+  return DEPENDENT_NOUNS.some((n) => before.includes(n) || after.includes(n));
 }
 
 function hasSelfReferentialNear(text: string, start: number, end: number): boolean {
   const before = text.slice(Math.max(0, start - SELF_REFERENTIAL_WINDOW), start);
   const after = text.slice(end, end + SELF_REFERENTIAL_WINDOW);
   return SELF_REFERENTIAL_KEYWORDS.some((k) => before.includes(k) || after.includes(k));
+}
+
+// (짧은 창 밖의) 절(clause) 단위 안전망 — "정의: 아동(만 19세 미만)"처럼 부양가족 명사가
+// 나이 표현과 같은 절에 있지만 앞뒤 창 밖에 떨어져 있는 경우까지 잡아낸다. ○ ㅇ □ ·
+// 줄바꿈, 줄 앞의 "-" 글머리표, 문장종결(한글 뒤 마침표/느낌표/물음표)을 절 경계로 본다.
+// "19-34"처럼 숫자 사이의 "-"는 글머리표가 아니므로 경계로 취급하지 않는다.
+const CLAUSE_BOUNDARY_CHARS = ["○", "ㅇ", "□", "·"];
+
+function isListDash(text: string, idx: number): boolean {
+  if (text[idx] !== "-") return false;
+  let i = idx - 1;
+  while (i >= 0 && (text[i] === " " || text[i] === "\t")) i--;
+  return i < 0 || text[i] === "\n";
+}
+
+function isSentenceEnderAt(text: string, idx: number): boolean {
+  const ch = text[idx];
+  if (ch !== "." && ch !== "!" && ch !== "?") return false;
+  const prev = text[idx - 1];
+  if (!prev || !/[가-힣]/.test(prev)) return false; // 날짜("5.1."), 소수 등 숫자 뒤 마침표는 제외
+  const next = text[idx + 1];
+  return next === undefined || /\s/.test(next);
+}
+
+function findClauseBoundaries(text: string): number[] {
+  const positions = [0, text.length];
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "\n" || CLAUSE_BOUNDARY_CHARS.includes(ch)) positions.push(i);
+    else if (isListDash(text, i)) positions.push(i);
+    else if (isSentenceEnderAt(text, i)) positions.push(i + 1);
+  }
+  return positions.sort((a, b) => a - b);
+}
+
+function getClause(text: string, start: number, end: number, boundaries: number[]): string {
+  let left = 0;
+  let right = text.length;
+  for (const b of boundaries) {
+    if (b <= start && b > left) left = b;
+    if (b >= end && b < right) right = b;
+  }
+  return text.slice(left, right);
+}
+
+// 절 전체에 부양가족 명사가 있고 신청인 본인을 가리키는 표현이 전혀 없으면, 그 절은
+// "지원 특성상 신청자 아님이 명백"하다고 보고(예: 자녀/아동 정의 문구) 그 절 안의 나이
+// 매치를 후보에서 제외한다. 같은 절에 본인을 가리키는 표현이 있으면(예: "청년 한부모") 그
+// 절만으로는 판단하지 않고 기존의 창(window) 기준에 맡긴다.
+function isDependentContextClause(clause: string): boolean {
+  const hasDependentNoun = DEPENDENT_NOUNS.some((n) => clause.includes(n));
+  if (!hasDependentNoun) return false;
+  const hasSelfReferential = SELF_REFERENTIAL_KEYWORDS.some((k) => clause.includes(k));
+  return !hasSelfReferential;
 }
 
 interface AgeCandidate {
@@ -66,9 +128,15 @@ interface AgeCandidate {
   end: number;
 }
 
-// text 안의 모든 매치를 훑어 후보를 만든다 — 부양가족 명사가 바로 뒤에 붙은 매치와
-// 신청인 나이로 보기 힘든(implausible) 밴드는 애초에 후보에서 제외한다.
-function collectCandidates(text: string, re: RegExp, toBand: (m: RegExpMatchArray) => { minAge?: number; maxAge?: number } | undefined): AgeCandidate[] {
+// text 안의 모든 매치를 훑어 후보를 만든다 — 부양가족 명사가 근처(앞/뒤 창)에 있거나 같은
+// 절 안에서 명백히 부양가족을 정의하는 매치, 그리고 신청인 나이로 보기 힘든(implausible)
+// 밴드는 애초에 후보에서 제외한다.
+function collectCandidates(
+  text: string,
+  re: RegExp,
+  toBand: (m: RegExpMatchArray) => { minAge?: number; maxAge?: number } | undefined,
+  clauseBoundaries: number[],
+): AgeCandidate[] {
   const global = new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`);
   const out: AgeCandidate[] = [];
   for (const m of text.matchAll(global)) {
@@ -76,7 +144,8 @@ function collectCandidates(text: string, re: RegExp, toBand: (m: RegExpMatchArra
     if (!band) continue;
     const start = m.index ?? 0;
     const end = start + m[0].length;
-    if (hasDependentNounAfter(text, end)) continue;
+    if (hasDependentNounNear(text, start, end)) continue;
+    if (isDependentContextClause(getClause(text, start, end, clauseBoundaries))) continue;
     if (!isPlausibleApplicantBand(band.minAge, band.maxAge)) continue;
     out.push({ ...band, start, end });
   }
@@ -93,6 +162,8 @@ function pickBest(candidates: AgeCandidate[], text: string): AgeCandidate | unde
 }
 
 function extractAgeRange(text: string): { minAge?: number; maxAge?: number } {
+  const clauseBoundaries = findClauseBoundaries(text);
+
   // 완전한 범위 표현(상·하한이 한 매치에 함께 있는 경우)을 먼저 찾는다 — 개별 상한/하한
   // 표현보다 신뢰도가 높다.
   const completeCandidates = [
@@ -101,13 +172,13 @@ function extractAgeRange(text: string): { minAge?: number; maxAge?: number } {
       const hi = Number(m[2]);
       if (!isPlausibleAge(lo) || !isPlausibleAge(hi) || lo > hi) return undefined;
       return { minAge: lo, maxAge: hi };
-    }),
+    }, clauseBoundaries),
     ...collectCandidates(text, RANGE_RE, (m) => {
       const lo = Number(m[1]);
       const hi = Number(m[2]);
       if (!isPlausibleAge(lo) || !isPlausibleAge(hi) || lo > hi) return undefined;
       return { minAge: lo, maxAge: hi };
-    }),
+    }, clauseBoundaries),
   ];
   const bestComplete = pickBest(completeCandidates, text);
   if (bestComplete) return { minAge: bestComplete.minAge, maxAge: bestComplete.maxAge };
@@ -116,11 +187,11 @@ function extractAgeRange(text: string): { minAge?: number; maxAge?: number } {
   const geCandidates = collectCandidates(text, GE_RE, (m) => {
     const v = Number(m[1]);
     return isPlausibleAge(v) ? { minAge: v } : undefined;
-  });
+  }, clauseBoundaries);
   const leCandidates = collectCandidates(text, LE_RE, (m) => {
     const v = Number(m[1]);
     return isPlausibleAge(v) ? { maxAge: v } : undefined;
-  });
+  }, clauseBoundaries);
 
   let minAge = pickBest(geCandidates, text)?.minAge;
   let maxAge = pickBest(leCandidates, text)?.maxAge;
@@ -130,7 +201,7 @@ function extractAgeRange(text: string): { minAge?: number; maxAge?: number } {
     const ltCandidates = collectCandidates(text, LT_RE, (m) => {
       const v = Number(m[1]);
       return v > 1 && v <= 100 ? { maxAge: v - 1 } : undefined;
-    });
+    }, clauseBoundaries);
     maxAge = pickBest(ltCandidates, text)?.maxAge;
   }
   if (minAge === undefined) {
@@ -138,7 +209,7 @@ function extractAgeRange(text: string): { minAge?: number; maxAge?: number } {
     const gtCandidates = collectCandidates(text, GT_RE, (m) => {
       const v = Number(m[1]);
       return v > 0 && v < 100 ? { minAge: v + 1 } : undefined;
-    });
+    }, clauseBoundaries);
     minAge = pickBest(gtCandidates, text)?.minAge;
   }
   return { minAge, maxAge };
