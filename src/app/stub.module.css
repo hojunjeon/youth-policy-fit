@@ -1,0 +1,41 @@
+.wrap {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 96px 32px 140px;
+}
+
+.heading {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 34px;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  margin-bottom: 28px;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: var(--ink-dim);
+  font-size: 15.5px;
+  line-height: 1.75;
+}
+
+.body p {
+  max-width: 46ch;
+}
+
+.back {
+  display: inline-block;
+  margin-top: 56px;
+  color: var(--celadon);
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: 2px;
+  transition: color 160ms ease, border-color 160ms ease;
+}
+
+.back:hover {
+  color: var(--ink);
+  border-color: var(--celadon);
+}

@@ -1,36 +1,93 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 채비
 
-## Getting Started
+개인 경험 관리 앱입니다. 세 가지 기능을 계획하고 있습니다.
 
-First, run the development server:
+1. **경험 DB** — 프로젝트·동아리·대외활동 경험을 한곳에 모아 정리하는 저장소. (준비 중)
+2. **자소서 초안** — 채용공고와 문항을 입력하면 문항 의도를 분석하고, 경험 DB에서 맞는 경험을 찾아 작성 흐름을 설계. (준비 중)
+3. **정책 매칭** — 프로필을 입력하면 챙길 수 있는 청년 정책·지원금을 찾아준다. (구현 완료)
+
+현재는 정책 매칭만 동작하며, 경험 DB와 자소서 초안은 `/experience`, `/essay` 경로에 안내 페이지만 있습니다.
+
+설계 방향상 **경험 DB가 중심축**입니다. 정책 매칭에서 입력하는 프로필(생년월일, 거주지, 취업 상태, 소득 등)과 자소서 초안에서 쓰는 경험 데이터는 결국 같은 저장소를 공유하도록 만들어, 한 번 입력한 정보를 세 기능이 함께 재사용하는 것이 목표입니다.
+
+## 빠른 실행
+
+Node.js가 설치되어 있다면, 아래 두 배치 파일 중 하나를 더블클릭하는 것만으로 실행할 수 있습니다.
+
+- **`실행.bat`** — 개발 서버(`npm run dev`)를 실행합니다. `node_modules`가 없으면 자동으로 `npm install`을 먼저 실행합니다. 잠시 후 브라우저가 `http://localhost:3000`으로 자동으로 열립니다. 창을 닫으면 서버가 종료됩니다.
+- **`실행(운영).bat`** — 운영용 실행입니다. `npm run build` 후 `npm run start`를 실행하며, 마찬가지로 브라우저가 자동으로 열립니다.
+
+`실행.bat`(개발 서버)은 3000번 포트가 이미 사용 중이면 Next.js가 다른 포트(예: 3001)를 자동으로 사용하므로, 그 경우 콘솔 창에 표시되는 실제 주소를 확인하세요. 반면 `실행(운영).bat`(운영 서버)은 포트가 이미 사용 중이면 다른 포트로 넘어가지 않고 그대로 실행에 실패하므로, 3000번 포트를 쓰는 다른 프로세스를 먼저 종료한 뒤 다시 실행하세요. Node.js가 설치되어 있지 않으면 창에 안내 메시지가 표시됩니다.
+
+## 실행법
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+브라우저에서 [http://localhost:3000](http://localhost:3000) 을 열면 됩니다.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 정책 데이터
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+기본값은 내장 시드 데이터(`src/data/policies.ts`)입니다. 2026-08-17 기준으로 정리한 데이터이며, 실제로 신청하기 전에는 반드시 각 정책의 공식 공고를 확인하세요.
 
-## Learn More
+### 데이터 소스 한눈에 보기
 
-To learn more about Next.js, take a look at the following resources:
+`/api/policies`는 아래 소스를 모두 병렬로 호출해 병합합니다. 키가 없거나 호출이 실패한 소스는 시드 데이터로 자연스럽게 대체되며, 응답의 `sources` 배열에서 각 소스의 상태(`ok` / `no-key` / `error`)를 확인할 수 있습니다.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| 소스                          | 필요한 키                | 활성화하면 늘어나는 데이터                | 어댑터                          |
+| ----------------------------- | ------------------------ | ------------------------------------------ | -------------------------------- |
+| 내장 시드                     | 없음                     | 항상 포함되는 대표 정책 12건               | `src/data/policies.ts`           |
+| 온통청년 청년정책              | `YOUTHCENTER_API_KEY`    | 전국 + 광역지자체 청년정책 전체            | `src/lib/sources/youthcenter.ts` |
+| 대한민국 공공서비스(혜택)      | `DATA_GO_KR_API_KEY`     | 보조금24 기반 전 국민 대상 혜택(청년 관련만 추출) | `src/lib/sources/govbenefits.ts` |
+| 복지로 중앙부처·지자체 복지서비스 | `DATA_GO_KR_API_KEY`     | 복지로에 등록된 복지서비스(청년 관련만 추출) | `src/lib/sources/welfare.ts`     |
+| K-스타트업 창업지원공고        | `DATA_GO_KR_API_KEY`(선택) | 진행 중인 창업지원사업 공고                | `src/lib/sources/kstartup.ts`    |
+| 정부24 RSS (`/api/feed`)      | 없음                     | 취업·창업·주거·육아교육 카테고리 최신 공공서비스 소식 | `src/app/api/feed/route.ts`      |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 온통청년 Open API 연동
 
-## Deploy on Vercel
+1. [온통청년](https://www.youthcenter.go.kr) 에 회원가입합니다.
+2. 마이페이지에서 오픈 API 인증키를 발급받습니다.
+3. 프로젝트 루트에 `.env.local` 파일을 만들고 아래 한 줄을 추가합니다.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+   ```
+   YOUTHCENTER_API_KEY=발급받은키
+   ```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+4. 개발 서버를 재시작합니다.
+
+### 공공데이터포털(data.go.kr) API 연동
+
+공공서비스(혜택)/복지로/K-스타트업 API는 모두 공공데이터포털의 **같은 인증키**를 씁니다.
+
+1. [공공데이터포털](https://www.data.go.kr) 에 로그인합니다.
+2. 아래 각 API 상세 페이지에서 "활용신청"을 누릅니다. (대부분 자동/즉시 승인)
+   - [대한민국 공공서비스(혜택)](https://www.data.go.kr/data/15113968/openapi.do)
+   - [복지로 중앙부처복지서비스](https://www.data.go.kr/data/15090532/openapi.do)
+   - [복지로 지자체복지서비스](https://www.data.go.kr/data/15108347/openapi.do)
+   - [K-스타트업 창업지원공고](https://www.data.go.kr/data/15125364/openapi.do)
+3. 마이페이지에서 인증키를 확인해 `.env.local`에 추가합니다.
+
+   ```
+   DATA_GO_KR_API_KEY=발급받은키
+   ```
+
+4. 개발 서버를 재시작합니다.
+
+정부24 RSS(`/api/feed`)는 키가 필요 없습니다. 어떤 키도 없거나 호출이 실패해도 앱은 시드 데이터만으로 정상 동작합니다.
+
+## 구조 개요
+
+- `src/lib/types.ts` — 프로필, 정책, 매칭 결과 등 도메인 타입.
+- `src/lib/match.ts` — 매칭 엔진. 프로필과 정책 규칙을 비교해 판정(적합/추가 입력 필요/부적합), 판정 사유, 미입력 항목, 마감 디데이를 계산.
+- `src/lib/profile.ts` — 프로필 저장.
+- `src/data/policies.ts` — 시드 정책 데이터.
+- `src/app/api/policies/route.ts` — 정책 데이터 소스의 단일 진입점. 온통청년 API 키가 있으면 실 데이터를 병합하고, 없거나 실패하면 시드만 반환.
+- `src/components/ProfileForm.tsx`, `src/components/PolicyCard.tsx` — 프로필 입력 폼과 정책 카드 UI.
+
+## 로드맵
+
+- 경험 DB 구현
+- 자소서 초안 구현
+- 정책 알림 (스케줄러/푸시)

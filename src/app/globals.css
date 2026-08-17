@@ -1,40 +1,45 @@
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-html {
-  height: 100%;
-}
-
-html,
-body {
-  max-width: 100vw;
-  overflow-x: hidden;
-}
-
-body {
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  /* 채비 팔레트 — 깊은 녹흑 바탕에 세라돈(옥색) 토널 악센트 */
+  --bg: #0f1512;
+  --bg-deep: #0b100d;
+  --surface: #161e19;
+  --surface-2: #1b2620;
+  --line: rgba(214, 228, 214, 0.09);
+  --line-strong: rgba(214, 228, 214, 0.16);
+  --ink: #e7ece3;
+  --ink-dim: #a7b3a4;
+  --ink-faint: #8a978a;
+  --celadon: #a9cbb4;
+  --celadon-deep: #6f9c81;
+  --sand: #d5bf94;
+  --ember: #d2a377;
+  --font-display: "Hahmlet Variable", "Hahmlet", serif;
+  --font-body: "Pretendard Variable", Pretendard, -apple-system, "Malgun Gothic", sans-serif;
 }
 
 * {
   box-sizing: border-box;
-  padding: 0;
   margin: 0;
+  padding: 0;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--ink);
+  background-color: var(--bg);
+  /* 그레인을 얹은 세로 톤 그라데이션 — 밴딩 없이 은은한 깊이 */
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.85 0 0 0 0 0.92 0 0 0 0 0.85 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, #121a14 0%, #0f1512 34%, #0e1310 70%, #0b100d 100%);
+  background-attachment: fixed;
+  font-size: 15px;
+  line-height: 1.6;
+  letter-spacing: -0.01em;
+  min-height: 100vh;
 }
 
 a {
@@ -42,8 +47,65 @@ a {
   text-decoration: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+input,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(169, 203, 180, 0.28);
+}
+
+/* 폼 기본기 — 프로젝트 전역에서 쓰는 입력 스타일 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field > span {
+  font-size: 12.5px;
+  color: var(--ink-dim);
+}
+
+.field input,
+.field select {
+  background: var(--bg-deep);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  padding: 9px 12px;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.field input:focus,
+.field select:focus {
+  border-color: rgba(169, 203, 180, 0.45);
+  background: #0d130f;
+}
+
+.field input::placeholder {
+  color: var(--ink-faint);
+}
+
+:focus-visible {
+  outline: 2px solid var(--celadon);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }

@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# server-persisted profile (single-user local storage, do not commit)
+/data/
+
 # production
 /build
 

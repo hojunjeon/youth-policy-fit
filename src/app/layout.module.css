@@ -1,0 +1,46 @@
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 26px 32px 10px;
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 24px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+.nav {
+  display: flex;
+  gap: 26px;
+  font-size: 14px;
+}
+
+.nav a {
+  display: inline-flex;
+  align-items: center;
+  padding: 12px 8px;
+  margin: 0 -8px;
+  color: var(--ink-dim);
+  transition: color 160ms ease;
+}
+
+.nav a:hover {
+  color: var(--ink);
+}
+
+.nav a.active {
+  color: var(--celadon);
+  font-weight: 600;
+}
+
+@media (max-width: 560px) {
+  .header {
+    padding: 20px 20px 8px;
+  }
+}
