@@ -19,13 +19,24 @@ export function profileFilledCount(profile: Profile): { filled: number; total: n
   return { filled: fields.filter((v) => v !== undefined).length, total: fields.length };
 }
 
+// 2026년 광주광역시(29)+전라남도(46) 통합으로 REGIONS의 시도코드가 12(전남광주통합특별시)
+// 하나로 바뀌었다 — 통합 이전에 저장된 프로필은 여전히 옛 코드를 갖고 있을 수 있으므로,
+// 저장소에서 읽어올 때 12로 옮겨준다(그대로 두면 REGIONS에 없는 코드가 되어 select에서
+// "선택 안 됨"으로 보이고, 지역 매칭도 조용히 항상 어긋난다).
+function migrateSido(profile: Profile): Profile {
+  if (profile.sido === "29" || profile.sido === "46") {
+    return { ...profile, sido: "12" };
+  }
+  return profile;
+}
+
 export function loadProfile(): Profile {
   if (typeof window === "undefined") return EMPTY_PROFILE;
   try {
     const raw = window.localStorage.getItem(KEY);
     if (!raw) return EMPTY_PROFILE;
     const parsed = JSON.parse(raw) as Profile;
-    return { ...EMPTY_PROFILE, ...parsed };
+    return migrateSido({ ...EMPTY_PROFILE, ...parsed });
   } catch {
     return EMPTY_PROFILE;
   }
@@ -42,13 +53,16 @@ export function saveProfile(profile: Profile): void {
 
 // 서버에 저장된 프로필을 읽는다. 서버가 없거나, 파일이 아직 없거나, 요청이 실패해도
 // null을 돌려주고 호출부(page.tsx)가 localStorage 값으로 계속 동작하게 한다.
+// page.tsx가 이 결과를 승자로 채택하면 loadProfile()을 거치지 않고 바로 setProfile/saveProfile에
+// 쓰이므로, 여기서도 loadProfile과 동일하게 migrateSido를 적용해야 옛 시도코드(29/46)가
+// 서버 경로로 다시 들어오는 것을 막을 수 있다.
 export async function fetchServerProfile(): Promise<Profile | null> {
   try {
     const res = await fetch("/api/profile", { cache: "no-store" });
     if (!res.ok) return null;
     const data = await res.json();
     if (data === null || typeof data !== "object") return null;
-    return { ...EMPTY_PROFILE, ...(data as Profile) };
+    return migrateSido({ ...EMPTY_PROFILE, ...(data as Profile) });
   } catch {
     return null;
   }

@@ -217,11 +217,26 @@ function extractAgeRange(text: string): { minAge?: number; maxAge?: number } {
 
 // 지역명은 오탐을 피하기 위해 정식 명칭(예: "서울특별시", "경기도")만 매칭한다.
 // "전국"이 명시된 경우는 지역 제한이 없다는 뜻이므로 코드를 세팅하지 않는다.
+//
+// 2026년 광주광역시(29)+전라남도(46) 통합으로 REGIONS엔 이제 "전남광주통합특별시"(12) 하나만
+// 있다 — 통합 표기는 위 REGIONS 루프로 자동 매칭된다. 다만 통합 이전에 작성된 공고 원문은
+// 여전히 옛 정식 명칭 "광주광역시"/"전라남도"를 그대로 쓸 수 있으므로, 기존과 같은 "정식
+// 명칭 전체 문자열만 매칭"(짧은 이름 bare 토큰은 매칭하지 않는) 원칙을 유지한 채 이 두
+// 옛 정식 명칭만 별도로 12에 매핑한다("광주"/"전남" 같은 bare 토큰은 여전히 매칭하지 않음 —
+// 예: "경기도 광주시"의 "광주"와 오탐 충돌).
+const LEGACY_SIDO_NAME_ALIASES: Record<string, string> = {
+  광주광역시: "12",
+  전라남도: "12",
+};
+
 function extractSido(text: string): string[] | undefined {
   if (text.includes("전국")) return undefined;
   const codes = new Set<string>();
   for (const region of REGIONS) {
     if (text.includes(region.name)) codes.add(region.code);
+  }
+  for (const [legacyName, code] of Object.entries(LEGACY_SIDO_NAME_ALIASES)) {
+    if (text.includes(legacyName)) codes.add(code);
   }
   return codes.size > 0 ? [...codes] : undefined;
 }
